@@ -2,8 +2,15 @@ import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
 import logging
+from openai import OpenAI
+import os
+from dotenv import load_dotenv
 from typing import Optional, Dict, List
 import numpy as np
+
+load_dotenv()
+
+DEEPSEEK_API = os.getenv("DEEPSEEK_API")
 
 class FinancialDataPipeline:
     def __init__(self, cache_dir: str = "./data_cache"):
@@ -125,7 +132,45 @@ class FinancialDataPipeline:
             self.logger.error(f"Error fetching fundamentals for {symbol}: {str(e)}")
             return {}
 
+class FundamentalAnalyzer:
+    def __init__(self, llm_client):
+        self.llm = llm_client
+        
+    def generate_analysis_prompt(self, fundamentals: dict, historical_metrics: dict) -> str:
+        prompt = f"""
+        Based on these current fundamental metrics:
+        - P/E Ratio: {fundamentals.get('PE_Ratio')} (5yr avg: {historical_metrics.get('PE_Ratio_avg')})
+        - Book Value: {fundamentals.get('Book_Value')} (5yr growth: {historical_metrics.get('Book_Value_growth')}%)
+        - Dividend Yield: {fundamentals.get('Dividend_Yield')} (5yr avg: {historical_metrics.get('Dividend_Yield_avg')})
+        - Profit Margins: {fundamentals.get('Profit_Margins')} (5yr trend: {historical_metrics.get('Margin_trend')})
+        - Market Cap: {fundamentals.get('Market_Cap')} (5yr CAGR: {historical_metrics.get('MarketCap_CAGR')}%)
+
+        Please analyze this company's valuation and explain:
+        1. How current metrics compare to historical averages and what this suggests
+        2. Whether recent trends indicate improving or deteriorating fundamentals
+        3. Key changes in the company's financial health over the past 5 years
+        4. Whether the stock appears overvalued or undervalued given this historical context
+        
+        Structure your response to be educational, explaining your reasoning for each point.
+        """
+        return prompt
+        
+    async def get_analysis(self, fundamentals: dict) -> dict:
+        prompt = self.generate_analysis_prompt(fundamentals)
+        
+        try:
+            response = await self.llm.analyze(prompt)
+            return {
+                'analysis': response,
+                'metrics_used': list(fundamentals.keys()),
+                'timestamp': datetime.now()
+            }
+        except Exception as e:
+            logging.error(f"Error getting LLM analysis: {str(e)}")
+            return None
+
+
 if __name__ == "__main__":
     pipeline = FinancialDataPipeline()
 
-    print(pipeline.fetch_historical_data("MSFT"))
+    #print(pipeline.fetch_historical_data("MSFT"))
