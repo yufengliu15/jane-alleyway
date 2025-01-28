@@ -133,8 +133,8 @@ class FinancialDataPipeline:
             return {}
 
 class FundamentalAnalyzer:
-    def __init__(self, llm_client):
-        self.llm = llm_client
+    def __init__(self, api_key: str = None):
+        self.llm = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
         
     def generate_analysis_prompt(self, fundamentals: dict, historical_metrics: dict) -> str:
         prompt = f"""
@@ -145,23 +145,43 @@ class FundamentalAnalyzer:
         - Profit Margins: {fundamentals.get('Profit_Margins')} (5yr trend: {historical_metrics.get('Margin_trend')})
         - Market Cap: {fundamentals.get('Market_Cap')} (5yr CAGR: {historical_metrics.get('MarketCap_CAGR')}%)
 
-        Please analyze this company's valuation and explain:
-        1. How current metrics compare to historical averages and what this suggests
-        2. Whether recent trends indicate improving or deteriorating fundamentals
-        3. Key changes in the company's financial health over the past 5 years
-        4. Whether the stock appears overvalued or undervalued given this historical context
+        Based on these metrics, you must:
+        1. Make a clear prediction: Will the stock price go UP or DOWN in the next 3 months?
+        2. Provide a confidence score (0-100%)
+        3. List the top 3 fundamental factors supporting your prediction
+        4. Explain any major risks that could invalidate your prediction
+
+        Format your response as:
+        PREDICTION: [UP/DOWN]
+        CONFIDENCE: [X%]
         
-        Structure your response to be educational, explaining your reasoning for each point.
-        """
+        SUPPORTING FACTORS:
+        1. [Factor 1 with specific metrics]
+        2. [Factor 2 with specific metrics]
+        3. [Factor 3 with specific metrics]
+        
+        RISKS:
+        - [Key risks to the prediction]
+
+        Remember: You must choose either UP or DOWN - no neutral stances.
+        
+        Structure your response to be educational, explaining your reasoning for each point."""
         return prompt
         
-    async def get_analysis(self, fundamentals: dict) -> dict:
-        prompt = self.generate_analysis_prompt(fundamentals)
+    def get_analysis(self, fundamentals: dict, historical_metrics: dict) -> dict:
+        prompt = self.generate_analysis_prompt(fundamentals, historical_metrics)
         
         try:
-            response = await self.llm.analyze(prompt)
+            response = self.llm.chat.completions.create(
+                model="deepseek-reasoner",
+                messages=[
+                    {"role": "system", "content": "You are a financial analyst focused on fundamental analysis. Provide educational explanations for your reasoning."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.6
+            )
             return {
-                'analysis': response,
+                'analysis': response.choices[0].message.content,
                 'metrics_used': list(fundamentals.keys()),
                 'timestamp': datetime.now()
             }
@@ -173,4 +193,19 @@ class FundamentalAnalyzer:
 if __name__ == "__main__":
     pipeline = FinancialDataPipeline()
 
-    #print(pipeline.fetch_historical_data("MSFT"))
+    analyzer = FundamentalAnalyzer(api_key=DEEPSEEK_API)
+
+    symbol = "AAPL"
+
+    fundamentals = pipeline.get_latest_fundamentals(symbol)
+    historical_metrics = pipeline.fetch_historical_data(symbol)
+
+    # print(fundamentals)
+    # print("=============================")
+    # print(historical_metrics)
+
+    analysis = analyzer.get_analysis(fundamentals, historical_metrics)
+
+    print(analysis)
+    print("========================")
+    print(analysis["analysis"])
